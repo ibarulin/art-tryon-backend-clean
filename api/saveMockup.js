@@ -5,6 +5,12 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
+
+  // Fallback: ensure JSON body is parsed
+  if (!req.body || typeof req.body !== 'object') {
+    try { req.body = JSON.parse(req.body); } catch { /* ignore */ }
+  }
+
   try {
     const { imageBase64 } = req.body || {};
     if (!imageBase64 || typeof imageBase64 !== 'string' || !imageBase64.startsWith('data:image/')) {
@@ -26,14 +32,15 @@ export default async function handler(req, res) {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: form.toString()
     });
-    const data = await resp.json();
 
+    const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
       return res.status(502).json({
         error: 'cloudinary_upload_failed',
-        details: data?.error?.message || data
+        details: data?.error?.message || data || 'unknown'
       });
     }
+
     return res.status(200).json({ url: data.secure_url, public_id: data.public_id });
   } catch (err) {
     return res.status(500).json({ error: 'upload_failed', details: err?.message || String(err) });
