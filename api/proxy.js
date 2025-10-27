@@ -1,47 +1,35 @@
 // /api/proxy.js
+import { applyCors } from './_cors.js';
+
 export default async function handler(req, res) {
+  if (applyCors(req, res)) return; // OPTIONS handled
+
   try {
-    const src = req.query.src;
-    if (!src) return res.status(400).send('Missing src');
+    const { src } = req.query;
+    if (!src || !/^https?:\/\//i.test(src)) return res.status(400).send('Bad src');
 
-    let u;
-    try { u = new URL(src); } catch { return res.status(400).send('Invalid URL'); }
-
-    // Разрешённые источники
-    const allowedHosts = [
+    const url = new URL(src);
+    // Белый список хостов — безопасно
+    const whitelist = new Set([
       'cdn.shopify.com',
-      'barulins.shop',
-      'www.barulins.shop',
-      'barulins.art',
-      'www.barulins.art',
-    ];
-    if (!allowedHosts.includes(u.hostname)) {
-      return res.status(400).send('Host not allowed');
+      'barulins.shop','www.barulins.shop',
+      'barulins.art','www.barulins.art'
+    ]);
+    if (!whitelist.has(url.hostname)) {
+      return res.status(403).send('Forbidden host');
     }
 
-    const upstream = await fetch(src, {
-      headers: {
-        'User-Agent': 'TryOnProxy/1.0',
-        'Accept': 'image/avif,image/webp,image/apng,image/*;q=0.8,*/*;q=0.5',
-        'Referer': 'https://barulins.shop/',
-      },
-    });
+    const upstream = await fetch(src, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!upstream.ok) return res.status(upstream.status).send('Upstream error');
 
-    if (!upstream.ok) {
-      return res.status(502).send('Upstream error: ' + upstream.status);
-    }
-
-    const ct = upstream.headers.get('content-type') || 'image/jpeg';
-    if (!/^image\//i.test(ct)) {
-      return res.status(400).send('Upstream is not an image');
-    }
-
-    res.setHeader('Content-Type', ct);
-    res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+    const ctype = upstream.headers.get('content-type') || 'image/jpeg';
+    res.setHeader('Content-Type', ctype);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
 
     const buf = Buffer.from(await upstream.arrayBuffer());
-    res.status(200).send(buf);
+    return res.status(200).send(buf);
   } catch (e) {
-    res.status(500).send('Proxy error');
+    console.error(e);
+    return res.status(500).send('Proxy error');
   }
 }
