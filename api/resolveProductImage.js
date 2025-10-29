@@ -4,13 +4,13 @@ export default async function handler(req, res) {
     const { handle } = req.query;
     if (!handle) return res.status(400).json({ ok: false, error: 'Missing ?handle' });
 
-    // ЖЁСТКО фиксируем домен и версию, чтобы исключить ошибку env
+    // Жёстко фиксируем домен и пробуем совместимую версию API
     const SHOPIFY_DOMAIN = 'barulins-shop.myshopify.com';
-    const STOREFRONT_TOKEN = process.env.SHOPIFY_STOREFRONT_TOKEN; // ваш shpat_… из Vercel
-    const API_VERSION = '2024-10';
+    const API_VERSION = '2023-10'; // понижаем версию для совместимости
+    const STOREFRONT_TOKEN = process.env.SHOPIFY_STOREFRONT_TOKEN;
 
     if (!STOREFRONT_TOKEN) {
-      return res.status(500).json({ ok: false, error: 'Missing SHOPIFY_STOREFRONT_TOKEN' });
+      return res.status(500).json({ ok: false, error: 'Missing SHOPIFY_STOREFRONT_TOKEN (env not loaded)' });
     }
 
     const url = `https://${SHOPIFY_DOMAIN}/api/${API_VERSION}/graphql.json`;
@@ -19,7 +19,7 @@ export default async function handler(req, res) {
         productByHandle(handle: $handle) {
           title
           featuredImage { url }
-          images(first: 4) { edges { node { url } } }
+          images(first: 5) { edges { node { url } } }
         }
       }
     `;
@@ -29,6 +29,7 @@ export default async function handler(req, res) {
       headers: {
         'Content-Type': 'application/json',
         'X-Shopify-Storefront-Access-Token': STOREFRONT_TOKEN,
+        'User-Agent': 'art-tryon-backend-clean/1.0', // иногда помогает при edge-проксировании
       },
       body: JSON.stringify({ query, variables: { handle } }),
     });
@@ -38,7 +39,11 @@ export default async function handler(req, res) {
       return res.status(resp.status).json({ ok: false, error: `Shopify error ${resp.status}`, detail: text });
     }
 
-    const data = JSON.parse(text);
+    let data;
+    try { data = JSON.parse(text); } catch (e) {
+      return res.status(500).json({ ok: false, error: 'Bad JSON from Shopify', detail: text });
+    }
+
     const p = data?.data?.productByHandle;
     if (!p) return res.status(404).json({ ok: false, error: 'Product not found' });
 
