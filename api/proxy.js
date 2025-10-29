@@ -1,35 +1,39 @@
-// /api/proxy.js
-import { applyCors } from './_cors.js';
+// api/proxy.js
+// Прокси до прямого URL картинки для обхода CORS
+
+import { cors } from './_cors';
 
 export default async function handler(req, res) {
-  if (applyCors(req, res)) return; // OPTIONS handled
+  cors(res, req.headers.origin);
+  if (req.method === 'OPTIONS') return res.status(204).end();
 
   try {
-    const { src } = req.query;
-    if (!src || !/^https?:\/\//i.test(src)) return res.status(400).send('Bad src');
+    const url = req.query.url;
+    if (!url) return res.status(400).json({ ok: false, error: 'Missing url' });
 
-    const url = new URL(src);
-    // Белый список хостов — безопасно
-    const whitelist = new Set([
-      'cdn.shopify.com',
-      'barulins.shop','www.barulins.shop',
-      'barulins.art','www.barulins.art'
-    ]);
-    if (!whitelist.has(url.hostname)) {
-      return res.status(403).send('Forbidden host');
+    // Тянем ресурс как браузер
+    const upstream = await fetch(url, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119 Safari/537.36'
+      }
+    });
+
+    if (!upstream.ok) {
+      return res
+        .status(502)
+        .json({ ok: false, error: `Upstream failed: ${upstream.status} ${upstream.statusText}` });
     }
 
-    const upstream = await fetch(src, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-    if (!upstream.ok) return res.status(upstream.status).send('Upstream error');
-
-    const ctype = upstream.headers.get('content-type') || 'image/jpeg';
-    res.setHeader('Content-Type', ctype);
-    res.setHeader('Cache-Control', 'public, max-age=3600');
+    const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
+    res.setHeader('Content-Type', contentType);
+    // Небольшой кэш на 5 минут
+    res.setHeader('Cache-Control', 'public, max-age=300');
 
     const buf = Buffer.from(await upstream.arrayBuffer());
-    return res.status(200).send(buf);
+    res.status(200).send(buf);
   } catch (e) {
-    console.error(e);
-    return res.status(500).send('Proxy error');
+    console.error('proxy error', e);
+    res.status(500).json({ ok: false, error: 'Proxy error' });
   }
 }
