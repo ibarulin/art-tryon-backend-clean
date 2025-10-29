@@ -1,77 +1,62 @@
 // api/resolveProductImage.js
+// Принимает ссылку на страницу товара/коллекции и возвращает главный URL картинки
+
+import { cors } from './_cors';
+
 export default async function handler(req, res) {
+  cors(res, req.headers.origin);
+  if (req.method === 'OPTIONS') return res.status(204).end();
+
   try {
-    // 1) handle можно передать прямо или дать URL товара ?url=https://.../products/<handle>
-    let { handle } = req.query;
-    if (!handle && req.query.url) {
-      try {
-        const u = new URL(req.query.url);
-        const parts = u.pathname.split('/').filter(Boolean);
-        const i = parts.indexOf('products');
-        if (i >= 0 && parts[i + 1]) handle = parts[i + 1];
-      } catch {}
-    }
-    if (!handle) {
-      return res.status(400).json({ ok: false, error: 'Missing ?handle or ?url with /products/<handle>' });
-    }
+    const pageUrl = req.query.url;
+    if (!pageUrl) return res.status(400).json({ ok: false, error: 'Missing url' });
 
-    // 2) Конфиг — берем из env, как вы настроили в Vercel
-    const SHOPIFY_DOMAIN = process.env.SHOPIFY_DOMAIN || 'barulins-shop.myshopify.com';
-    const API_VERSION = '2023-10';
-    const STOREFRONT_TOKEN = process.env.SHOPIFY_STOREFRONT_TOKEN;
-    if (!STOREFRONT_TOKEN) {
-      return res.status(500).json({ ok: false, error: 'Missing SHOPIFY_STOREFRONT_TOKEN env' });
-    }
-
-    const url = `https://${SHOPIFY_DOMAIN}/api/${API_VERSION}/graphql.json`;
-    const query = `
-      query ProductByHandle($handle: String!) {
-        productByHandle(handle: $handle) {
-          title
-          featuredImage { url }
-          images(first: 10) { edges { node { url } } }
-        }
-      }
-    `;
-
-    // 3) Таймаут на всякий случай
-    const controller = new AbortController();
-    const to = setTimeout(() => controller.abort(), 15000);
-
-    const resp = await fetch(url, {
-      method: 'POST',
+    // Забираем HTML страницы
+    const html = await fetch(pageUrl, {
       headers: {
-        'Content-Type': 'application/json',
-        'X-Shopify-Storefront-Access-Token': STOREFRONT_TOKEN,
-        'User-Agent': 'art-tryon-backend/1.0'
-      },
-      body: JSON.stringify({ query, variables: { handle } }),
-      signal: controller.signal
-    }).finally(() => clearTimeout(to));
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119 Safari/537.36'
+      }
+    }).then(r => r.text());
 
-    const text = await resp.text();
-    if (!resp.ok) {
-      return res.status(resp.status).json({ ok: false, error: `Shopify HTTP ${resp.status}`, detail: text });
+    // Пробуем разные варианты, где магазины обычно кладут главную картинку
+    let imageUrl = null;
+
+    // 1) og:image
+    imageUrl = imageUrl || html.match(/<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i)?.[1];
+
+    // 2) twitter:image
+    imageUrl = imageUrl || html.match(/<meta\s+name=["']twitter:image["']\s+content=["']([^"']+)["']/i)?.[1];
+
+    // 3) JSON-LD "image": "..."
+    imageUrl =
+      imageUrl ||
+      html.match(/"image"\s*:\s*"([^"]+\.(?:png|jpe?g|webp)(?:\?[^"]*)?)"/i)?.[1];
+
+    // 4) Любая <img ... src="...jpg|png|webp"> — берём первую крупную
+    if (!imageUrl) {
+      const candidates = [...html.matchAll(/<img[^>]+src=["']([^"']+\.(?:png|jpe?g|webp)(?:\?[^"']*)?)["'][^>]*>/gi)]
+        .map(m => m[1]);
+      imageUrl = candidates?.[0] || null;
     }
 
-    let data;
-    try { data = JSON.parse(text); }
-    catch { return res.status(502).json({ ok: false, error: 'Bad JSON from Shopify', detail: text?.slice(0,500) }); }
+    if (!imageUrl) {
+      return res.status(404).json({ ok: false, error: 'Image not found on page' });
+    }
 
-    const p = data?.data?.productByHandle;
-    if (!p) return res.status(404).json({ ok: false, error: 'Product not found' });
+    // Приведём к абсолютному URL, если вдруг относительный
+    try {
+      const u = new URL(imageUrl);
+      imageUrl = u.toString();
+    } catch {
+      // относительный путь
+      const base = new URL(pageUrl);
+      imageUrl = new URL(imageUrl, base.origin).toString();
+    }
 
-    const candidates = [
-      p?.featuredImage?.url,
-      ...(p?.images?.edges || []).map(e => e?.node?.url).filter(Boolean)
-    ].filter(Boolean);
-
-    const image = candidates[0] || null;
-    if (!image) return res.status(404).json({ ok: false, error: 'No image on product' });
-
-    return res.status(200).json({ ok: true, image, title: p.title, handle });
+    return res.status(200).json({ ok: true, imageUrl });
   } catch (e) {
-    const msg = e?.name === 'AbortError' ? 'Upstream timeout' : (e?.message || 'Server error');
-    return res.status(500).json({ ok: false, error: msg });
+    console.error('resolver error', e);
+    return res.status(500).json({ ok: false, error: 'Resolver error' });
   }
 }
