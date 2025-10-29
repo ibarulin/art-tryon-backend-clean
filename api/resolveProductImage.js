@@ -1,7 +1,6 @@
-// api/resolveProductImage.js
-// Принимает ссылку на страницу товара/коллекции и возвращает главный URL картинки
+export const config = { runtime: 'nodejs' };
 
-import { cors } from './_cors';
+import { cors } from './_cors.js';
 
 export default async function handler(req, res) {
   cors(res, req.headers.origin);
@@ -9,54 +8,29 @@ export default async function handler(req, res) {
 
   try {
     const pageUrl = req.query.url;
-    if (!pageUrl) return res.status(400).json({ ok: false, error: 'Missing url' });
+    if (!pageUrl) return res.status(400).json({ ok:false, error:'Missing url' });
 
-    // Забираем HTML страницы
-    const html = await fetch(pageUrl, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119 Safari/537.36'
-      }
-    }).then(r => r.text());
+    const r = await fetch(pageUrl, { headers:{ 'User-Agent':'Mozilla/5.0' } });
+    if (!r.ok) return res.status(502).json({ ok:false, error:`Fetch ${r.status}` });
+    const html = await r.text();
 
-    // Пробуем разные варианты, где магазины обычно кладут главную картинку
-    let imageUrl = null;
-
-    // 1) og:image
-    imageUrl = imageUrl || html.match(/<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i)?.[1];
-
-    // 2) twitter:image
-    imageUrl = imageUrl || html.match(/<meta\s+name=["']twitter:image["']\s+content=["']([^"']+)["']/i)?.[1];
-
-    // 3) JSON-LD "image": "..."
-    imageUrl =
-      imageUrl ||
+    let imageUrl =
+      html.match(/<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i)?.[1] ||
+      html.match(/<meta\s+name=["']twitter:image["']\s+content=["']([^"']+)["']/i)?.[1] ||
       html.match(/"image"\s*:\s*"([^"]+\.(?:png|jpe?g|webp)(?:\?[^"]*)?)"/i)?.[1];
 
-    // 4) Любая <img ... src="...jpg|png|webp"> — берём первую крупную
     if (!imageUrl) {
-      const candidates = [...html.matchAll(/<img[^>]+src=["']([^"']+\.(?:png|jpe?g|webp)(?:\?[^"']*)?)["'][^>]*>/gi)]
-        .map(m => m[1]);
-      imageUrl = candidates?.[0] || null;
+      const m = [...html.matchAll(/<img[^>]+src=["']([^"']+\.(?:png|jpe?g|webp)(?:\?[^"']*)?)["'][^>]*>/gi)];
+      imageUrl = m[0]?.[1] || null;
     }
+    if (!imageUrl) return res.status(404).json({ ok:false, error:'Image not found on page' });
 
-    if (!imageUrl) {
-      return res.status(404).json({ ok: false, error: 'Image not found on page' });
-    }
+    try { imageUrl = new URL(imageUrl).toString(); }
+    catch { imageUrl = new URL(imageUrl, new URL(pageUrl).origin).toString(); }
 
-    // Приведём к абсолютному URL, если вдруг относительный
-    try {
-      const u = new URL(imageUrl);
-      imageUrl = u.toString();
-    } catch {
-      // относительный путь
-      const base = new URL(pageUrl);
-      imageUrl = new URL(imageUrl, base.origin).toString();
-    }
-
-    return res.status(200).json({ ok: true, imageUrl });
+    res.status(200).json({ ok:true, imageUrl });
   } catch (e) {
     console.error('resolver error', e);
-    return res.status(500).json({ ok: false, error: 'Resolver error' });
+    res.status(500).json({ ok:false, error:'Resolver error' });
   }
 }
