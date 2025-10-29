@@ -1,17 +1,14 @@
-// /api/_cors.js
-export function applyCors(req, res) {
-  const origin = req.headers.origin || '';
-  const allowed = ['https://barulins.art', 'https://www.barulins.art'];
-  const allowOrigin = allowed.includes(origin) ? origin : allowed[0];
-
-  res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+export function cors(res, reqOrigin) {
+  const ALLOW = [
+    'https://barulins.art',
+    'https://www.barulins.art',
+    'https://barulins.shop',
+    'https://www.barulins.shop',
+    'https://tilda.ws'
+  ];
+  const origin = reqOrigin && ALLOW.includes(reqOrigin) ? reqOrigin : 'https://barulins.art';
+  res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary', 'Origin');
-
-  if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    res.status(204).end();
-    return true; // preflight обработан
-  }
-  return false;
+  res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
