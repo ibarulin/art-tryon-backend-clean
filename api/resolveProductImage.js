@@ -2,13 +2,11 @@
 export default async function handler(req, res) {
   try {
     const { handle } = req.query;
-    if (!handle) {
-      return res.status(400).json({ ok: false, error: 'Missing ?handle' });
-    }
+    if (!handle) return res.status(400).json({ ok: false, error: 'Missing ?handle' });
 
-    // Настройки
-    const SHOPIFY_DOMAIN = process.env.SHOPIFY_DOMAIN || 'barulins-shop.myshopify.com';
-    const STOREFRONT_TOKEN = process.env.SHOPIFY_STOREFRONT_TOKEN;
+    // ЖЁСТКО фиксируем домен и версию, чтобы исключить ошибку env
+    const SHOPIFY_DOMAIN = 'barulins-shop.myshopify.com';
+    const STOREFRONT_TOKEN = process.env.SHOPIFY_STOREFRONT_TOKEN; // ваш shpat_… из Vercel
     const API_VERSION = '2024-10';
 
     if (!STOREFRONT_TOKEN) {
@@ -16,7 +14,6 @@ export default async function handler(req, res) {
     }
 
     const url = `https://${SHOPIFY_DOMAIN}/api/${API_VERSION}/graphql.json`;
-
     const query = `
       query ProductByHandle($handle: String!) {
         productByHandle(handle: $handle) {
