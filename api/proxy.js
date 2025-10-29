@@ -1,3 +1,4 @@
+// api/proxy.js
 export const config = { runtime: 'nodejs' };
 
 import { Buffer } from 'node:buffer';
@@ -9,11 +10,19 @@ export default async function handler(req, res) {
 
   try {
     const url = req.query.url;
-    if (!url) return res.status(400).json({ ok:false, error:'Missing url' });
+    if (!url) return res.status(400).json({ ok: false, error: 'Missing url' });
 
-    const upstream = await fetch(url, { headers: { 'User-Agent':'Mozilla/5.0' } });
+    const upstream = await fetch(url, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119 Safari/537.36',
+        'Accept': '*/*',
+      },
+      redirect: 'follow',
+    });
+
     if (!upstream.ok) {
-      return res.status(502).json({ ok:false, error:`Upstream ${upstream.status}` });
+      return res.status(502).json({ ok: false, error: `Upstream ${upstream.status}` });
     }
 
     const ct = upstream.headers.get('content-type') || 'application/octet-stream';
@@ -24,6 +33,6 @@ export default async function handler(req, res) {
     res.status(200).send(buf);
   } catch (e) {
     console.error('proxy error', e);
-    res.status(500).json({ ok:false, error:'Proxy error' });
+    res.status(500).json({ ok: false, error: 'Proxy error' });
   }
 }
